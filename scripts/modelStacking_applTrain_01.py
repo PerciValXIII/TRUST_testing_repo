@@ -114,14 +114,15 @@ model_configs = {
 
 
 # Function to generate out-of-fold (OOF) predictions
-def get_oof_predictions(model_name, model_class, params, X_train, y_train, X_test):
+
+def get_oof_predictions(model_name, model_class, params, X_train, y_train):
     """
     Generates Out-of-Fold (OOF) predictions using KFold CV.
     """
-    oof_train = np.zeros(X_train.shape[0])
-    oof_test = np.zeros(X_test.shape[0])
-    oof_test_skf = np.empty((NFOLDS, X_test.shape[0]))
+    oof_train = np.zeros(X_train.shape[0])  # OOF predictions for training set
 
+    kf = KFold(n_splits=NFOLDS, shuffle=True, random_state=SEED)
+    
     for i, (train_idx, valid_idx) in enumerate(kf.split(X_train)):
         logging.info(f"Training fold {i+1} for {model_name}...")
 
@@ -131,48 +132,70 @@ def get_oof_predictions(model_name, model_class, params, X_train, y_train, X_tes
         model = model_class(**params)
         model.fit(X_tr, y_tr)
 
-        oof_train[valid_idx] = model.predict_proba(X_val)[:,1]
-        oof_test_skf[i, :] = model.predict_proba(X_test)[:,1]
+        oof_train[valid_idx] = model.predict_proba(X_val)[:, 1]  # OOF predictions on validation set
 
-        # Save each trained model
         joblib.dump(model, os.path.join(MODEL_DIR, f"{model_name}_fold_{i+1}.pkl"))
 
-    oof_test[:] = oof_test_skf.mean(axis=0)
-
     logging.info(f"{model_name} CV AUC Score: {roc_auc_score(y_train, oof_train):.5f}")
-    return oof_train.reshape(-1, 1), oof_test.reshape(-1, 1)
+    return oof_train.reshape(-1, 1)
 
 
-oof_train_list, oof_test_list = [], []
+# Train models and generate OOF predictions
+oof_train_list = []
+
 
 # Run models in parallel using joblib
 for model_name, config in model_configs.items():
-    oof_train, oof_test = get_oof_predictions(model_name, config["model"], config["params"], X_train, y_train, X_test)
+    oof_train = get_oof_predictions(model_name, config["model"], config["params"], X_train, y_train)
     oof_train_list.append(oof_train)
-    oof_test_list.append(oof_test)
 
 # Stack OOF predictions
 stacked_train = np.hstack(oof_train_list)
-stacked_test = np.hstack(oof_test_list)
 
-logging.info(f"Stacked train shape: {stacked_train.shape}, Stacked test shape: {stacked_test.shape}")
+
+logging.info(f"Stacked train shape: {stacked_train.shape}")
 
 # Train meta-model (Logistic Regression)
 logging.info("Training meta-model...")
 meta_model = LogisticRegression()
 meta_model.fit(stacked_train, y_train)
 
-# Make final predictions
-final_predictions = meta_model.predict_proba(stacked_test)[:,1]
+# # Make final predictions
+# final_predictions = meta_model.predict_proba(stacked_test)[:,1]
 
 # Save meta-model and predictions
 joblib.dump(meta_model, os.path.join(MODEL_DIR, "stacking_meta_model.pkl"))
-pd.DataFrame({"ID": np.arange(len(final_predictions)), "TARGET": final_predictions}).to_csv("stacking_predictions.csv", index=False)
 
-logging.info("Stacking model training completed. Predictions saved.")
 
-# Save final hold-out set for evaluation later
-X_final_test.to_csv("final_test_features.csv", index=False)
-y_final_test.to_csv("final_test_labels.csv", index=False)
-logging.info("Final test set saved for future evaluation.")
 
+# Evaluate on final holdout test set
+final_test_preds_list = []
+
+for model_name, config in model_configs.items():
+    logging.info(f"Loading trained {model_name} models for final test evaluation...")
+
+    fold_preds = []
+
+    # Load the trained models and make predictions on X_final_test
+    for fold in range(NFOLDS):
+        model_path = os.path.join(MODEL_DIR, f"{model_name}_fold_{fold+1}.pkl")
+        model = joblib.load(model_path)
+        fold_preds.append(model.predict_proba(X_final_test)[:, 1])
+
+    # Average across all folds
+    final_test_preds = np.mean(fold_preds, axis=0)
+    final_test_preds_list.append(final_test_preds.reshape(-1, 1))
+
+stacked_final_test = np.hstack(final_test_preds_list)
+
+# Make final predictions using the trained meta-model
+final_predictions = meta_model.predict_proba(stacked_final_test)[:, 1]
+
+# Evaluate model performance on the holdout set
+auc_score = roc_auc_score(y_final_test, final_predictions)
+logging.info(f"Final Stacking Model AUC on Holdout Test Set: {auc_score:.5f}")
+
+# Save results
+pd.DataFrame({"ID": np.arange(len(final_predictions)), "TARGET": final_predictions}).to_csv("final_test_predictions.csv", index=False)
+
+logging.info("Final test predictions saved.")
