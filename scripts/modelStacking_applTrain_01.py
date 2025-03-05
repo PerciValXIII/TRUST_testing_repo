@@ -12,22 +12,32 @@ import joblib
 import gc
 import logging
 import os
+import re
+
 
 # Enable garbage collection
 gc.enable()
 
-# # Set up logging for cloud execution tracking
-# logging.basicConfig(filename="stacking_log.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Set up logging for cloud execution tracking
+logging.basicConfig(filename="stacking_log.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Define parameters
 NFOLDS = 5  
 SEED = 42
 N_JOBS = -1  # Use all available cores
-MODEL_DIR = "/models" 
+MODEL_DIR = "models"
 
 # Load dataset 
-filepath = "../data/appl_train_benchmark_001.csv"
+filepath = "data/appl_train_benchmark_001.csv"
 data = pd.read_csv(filepath)  
+
+# Function to clean feature names
+def clean_feature_names(df):
+    df.columns = [re.sub(r'[^a-zA-Z0-9_]', '', col) for col in df.columns]  # Keep only alphanumeric & underscores
+    return df
+
+#cleaning feature names 
+data = clean_feature_names(data)
 
 # Separate features and target
 y = data['TARGET']
