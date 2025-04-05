@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import os
+from pathlib import Path
 from typing import Dict, List
 
 
@@ -74,24 +76,26 @@ class BureauFeatureEngineer:
         base_agg = self.perform_aggregation(self.df_bureau, agg_funcs, "b_")
 
         # Filtered aggregations
-        filters = {
-            self.df_bureau["CREDIT_ACTIVE"] == "Active": "b_active_",
-            self.df_bureau["CREDIT_ACTIVE"] == "Closed": "b_closed_",
-            self.df_bureau["CREDIT_TYPE"] == "Consumer credit": "b_consumer_",
-            self.df_bureau["CREDIT_TYPE"] == "Credit card": "b_credit_",
-            self.df_bureau["CREDIT_TYPE"] == "Car loan": "b_car_",
-            self.df_bureau["CREDIT_TYPE"] == "Mortgage": "b_mortgage_",
-            self.df_bureau["CREDIT_TYPE"] == "Microloan": "b_micro_",
-            self.df_bureau["DAYS_CREDIT"] >= -720: "b_720_",
-            self.df_bureau["DAYS_CREDIT"] >= -365: "b_365_"
-        }
+        filters = [
+            (self.df_bureau["CREDIT_ACTIVE"] == "Active", "b_active_"),
+            (self.df_bureau["CREDIT_ACTIVE"] == "Closed", "b_closed_"),
+            (self.df_bureau["CREDIT_TYPE"] == "Consumer credit", "b_consumer_"),
+            (self.df_bureau["CREDIT_TYPE"] == "Credit card", "b_credit_"),
+            (self.df_bureau["CREDIT_TYPE"] == "Car loan", "b_car_"),
+            (self.df_bureau["CREDIT_TYPE"] == "Mortgage", "b_mortgage_"),
+            (self.df_bureau["CREDIT_TYPE"] == "Microloan", "b_micro_"),
+            (self.df_bureau["DAYS_CREDIT"] >= -720, "b_720_"),
+            (self.df_bureau["DAYS_CREDIT"] >= -365, "b_365_"),
+        ]
 
-        for condition, prefix in filters.items():
+        for condition, prefix in filters:
             filtered_df = self.df_bureau[condition].copy()
             filtered_agg = self.perform_aggregation(filtered_df, agg_funcs, prefix)
             base_agg = base_agg.merge(filtered_agg, on="SK_ID_CURR", how="left")
-
-        self.features = base_agg
+        
+        # Join with TARGET from application data
+        df_target = self.df_application[["SK_ID_CURR", "TARGET"]]
+        self.features = base_agg.merge(df_target, on="SK_ID_CURR", how="inner")
 
     def get_features(self) -> pd.DataFrame:
         if self.features is None:
@@ -99,16 +103,19 @@ class BureauFeatureEngineer:
         return self.features
 
 
-# Example usage:
 if __name__ == "__main__":
+    root_dir = Path(__file__).resolve().parents[2]
+    
     engineer = BureauFeatureEngineer(
-        application_path="data/raw/application_train.csv",
-        bureau_path="data/raw/bureau.csv",
-        bureau_balance_path="data/raw/bureau_balance.csv"
+        application_path=os.path.join(root_dir, "data", "raw", "application_train.csv"),
+        bureau_path=os.path.join(root_dir, "data", "raw", "bureau.csv"),
+        bureau_balance_path=os.path.join(root_dir, "data", "raw", "bureau_balance.csv")
     )
     engineer.load_data()
     engineer.engineer_features()
     features_df = engineer.get_features()
 
-    # Optionally save to file
-    features_df.to_csv("data/processed/deq_features_level1.csv", index=False)
+    # save in data>processed
+    output_path = os.path.join(root_dir, "data", "processed", "deq_features_level1.csv")
+    features_df.to_csv(output_path, index=False)
+
