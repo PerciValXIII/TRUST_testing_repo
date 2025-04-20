@@ -62,13 +62,11 @@ class AMTFFeatureEngineer:
 
     def engineer_pos_features(self):
         df = self.df_pos.copy()
-        df["amtf_loan_duration_months"] = df["MONTHS_BALANCE"].max() - df["MONTHS_BALANCE"].min() + 1
+        df["amtf_loan_duration_months"] = df.groupby("SK_ID_PREV")["MONTHS_BALANCE"].transform("max") - df.groupby("SK_ID_PREV")["MONTHS_BALANCE"].transform("min") + 1
         df["amtf_instalments_completed"] = df["CNT_INSTALMENT"] - df["CNT_INSTALMENT_FUTURE"]
         df["amtf_future_installment_ratio"] = df["CNT_INSTALMENT_FUTURE"] / df["CNT_INSTALMENT"]
-
         df["amtf_overdue_flag"] = (df["SK_DPD"] > 0).astype(int)
         df["amtf_deferral_flag"] = (df["SK_DPD_DEF"] > 0).astype(int)
-
         df["amtf_active_status_flag"] = (df["NAME_CONTRACT_STATUS"] == "Active").astype(int)
         df["amtf_completed_status_flag"] = (df["NAME_CONTRACT_STATUS"] == "Completed").astype(int)
 
@@ -81,13 +79,10 @@ class AMTFFeatureEngineer:
                 "CNT_INSTALMENT_FUTURE": ["max", "min", "mean", "std", "sum"],
                 "amtf_instalments_completed": ["sum"],
                 "amtf_future_installment_ratio": ["mean"],
-
                 "SK_DPD": ["max", "mean", "std"],
                 "amtf_overdue_flag": ["sum"],
-
                 "SK_DPD_DEF": ["max", "mean", "std"],
                 "amtf_deferral_flag": ["sum"],
-
                 "amtf_active_status_flag": ["sum", "mean"],
                 "amtf_completed_status_flag": ["sum", "mean"],
             }
@@ -99,7 +94,6 @@ class AMTFFeatureEngineer:
         df["amtf_credit_utilization_ratio"] = df["AMT_BALANCE"] / df["AMT_CREDIT_LIMIT_ACTUAL"].replace(0, np.nan)
         df["amtf_overdue_flag"] = (df["SK_DPD"] > 0).astype(int)
         df["amtf_deferral_flag"] = (df["SK_DPD_DEF"] > 0).astype(int)
-
         df["amtf_active_status_flag"] = (df["NAME_CONTRACT_STATUS"] == "Active").astype(int)
         df["amtf_completed_status_flag"] = (df["NAME_CONTRACT_STATUS"] == "Completed").astype(int)
 
@@ -110,27 +104,21 @@ class AMTFFeatureEngineer:
                 "AMT_BALANCE": ["max", "min", "mean", "std", "sum"],
                 "AMT_CREDIT_LIMIT_ACTUAL": ["max", "min", "mean", "sum"],
                 "amtf_credit_utilization_ratio": ["mean", "max"],
-
                 "AMT_PAYMENT_CURRENT": ["max", "min", "mean", "sum"],
                 "AMT_PAYMENT_TOTAL_CURRENT": ["max", "sum"],
                 "AMT_RECEIVABLE_PRINCIPAL": ["max", "min", "mean", "sum"],
                 "AMT_RECIVABLE": ["mean", "sum"],
-
                 "AMT_DRAWINGS_ATM_CURRENT": ["sum"],
                 "AMT_DRAWINGS_POS_CURRENT": ["sum"],
                 "AMT_DRAWINGS_OTHER_CURRENT": ["sum"],
                 "AMT_DRAWINGS_CURRENT": ["sum"],
-
                 "CNT_DRAWINGS_ATM_CURRENT": ["mean"],
                 "CNT_DRAWINGS_POS_CURRENT": ["mean"],
                 "CNT_DRAWINGS_CURRENT": ["mean"],
-
                 "SK_DPD": ["max", "mean"],
                 "amtf_overdue_flag": ["sum", "mean"],
-
                 "SK_DPD_DEF": ["max", "mean"],
                 "amtf_deferral_flag": ["sum", "mean"],
-
                 "amtf_active_status_flag": ["sum", "mean"],
                 "amtf_completed_status_flag": ["sum", "mean"]
             }
@@ -139,16 +127,12 @@ class AMTFFeatureEngineer:
 
     def engineer_installment_features(self):
         df = self.df_inst.copy()
-
         df["amtf_payment_to_instalment_ratio"] = df["AMT_PAYMENT"] / df["AMT_INSTALMENT"].replace(0, np.nan)
-
         df["amtf_late_flag"] = (df["DAYS_ENTRY_PAYMENT"] > 0).astype(int)
         df["amtf_early_flag"] = (df["DAYS_ENTRY_PAYMENT"] < 0).astype(int)
-
         df["amtf_exact_or_over_flag"] = (df["AMT_PAYMENT"] >= df["AMT_INSTALMENT"]).astype(int)
         df["amtf_under_flag"] = (df["AMT_PAYMENT"] < df["AMT_INSTALMENT"]).astype(int)
-        df["amtf_under_amt"] = df["AMT_INSTALMENT"] - df["AMT_PAYMENT"]
-        df.loc[df["amtf_under_amt"] < 0, "amtf_under_amt"] = 0
+        df["amtf_under_amt"] = (df["AMT_INSTALMENT"] - df["AMT_PAYMENT"]).clip(lower=0)
 
         agg = self.group_stats(
             df,
@@ -157,12 +141,10 @@ class AMTFFeatureEngineer:
                 "AMT_INSTALMENT": ["sum", "mean", "max", "min"],
                 "AMT_PAYMENT": ["sum", "mean", "max", "min", "std"],
                 "amtf_payment_to_instalment_ratio": ["mean"],
-
                 "amtf_late_flag": ["sum", "mean"],
                 "amtf_early_flag": ["sum", "mean"],
                 "DAYS_ENTRY_PAYMENT": ["std"],
                 "DAYS_INSTALMENT": ["max", "min", "mean"],
-
                 "NUM_INSTALMENT_VERSION": ["nunique"],
                 "NUM_INSTALMENT_NUMBER": ["nunique"],
                 "amtf_exact_or_over_flag": ["sum"],
@@ -183,10 +165,10 @@ class AMTFFeatureEngineer:
         print(f"Credit Card features shape: {cc_df.shape}")
         print(f"Installments features shape: {inst_df.shape}")
 
-        # Combine on SK_ID_CURR and SK_ID_PREV
         combined = pd.merge(pos_df, cc_df, on=["SK_ID_CURR", "SK_ID_PREV"], how="outer")
         combined = pd.merge(combined, inst_df, on=["SK_ID_CURR", "SK_ID_PREV"], how="outer")
 
+        self.features = combined
 
     def get_features(self) -> pd.DataFrame:
         if self.features is None:
@@ -206,7 +188,7 @@ if __name__ == "__main__":
 
     engineer.load_data()
     engineer.engineer_features()
-    # features_df = engineer.get_features()
+    features_df = engineer.get_features()
 
-    # output_path = os.path.join(root, "data", "processed", "amtf_features_level1.csv")
-    # features_df.to_csv(output_path, index=False)
+    output_path = os.path.join(root, "data", "processed", "amtf_features_level1.csv")
+    features_df.to_csv(output_path, index=False)
