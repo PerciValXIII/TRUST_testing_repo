@@ -12,13 +12,11 @@ import xgboost as xgb
 import lightgbm as lgb
 
 def clean_feature_names(df):
-    df.columns = [
-        re.sub(r'[^\w\d_]', '_', col)  # Replace non-alphanumeric/underscore with _
-        for col in df.columns
-    ]
+    df.columns = [re.sub(r'[^\w\d_]', '_', col) for col in df.columns]
     return df
 
-def train_base_models_with_oof(data, feature_group, n_splits=5, model_save_dir="outputs/models/"):
+
+def train_base_models_with_oof(data, feature_group, n_splits=5, model_save_dir="outputs/models/", logger=None):
 
     os.makedirs(model_save_dir, exist_ok=True)
 
@@ -31,10 +29,10 @@ def train_base_models_with_oof(data, feature_group, n_splits=5, model_save_dir="
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
     models = {
-        "xgb": xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss'),
-        "lgb": lgb.LGBMClassifier(),
-        "logreg": LogisticRegression(max_iter=1000),
-        "rf": RandomForestClassifier(n_estimators=100),
+        "xgb": xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42),
+        "lgb": lgb.LGBMClassifier(random_state=42),
+        "logreg": LogisticRegression(max_iter=1000, random_state=42),
+        "rf": RandomForestClassifier(n_estimators=100, random_state=42),
         "knn": KNeighborsClassifier(n_neighbors=5)
     }
 
@@ -53,7 +51,8 @@ def train_base_models_with_oof(data, feature_group, n_splits=5, model_save_dir="
             val_preds = model_clone.predict_proba(X.iloc[val_idx])[:, 1]
 
             fold_auc = roc_auc_score(y.iloc[val_idx], val_preds)
-            print(f"   AUC for fold {i+1}: {fold_auc:.4f}")
+            if logger:
+                logger.info(f"   AUC for fold {i+1}: {fold_auc:.4f}")
 
             oof_preds[val_idx] = val_preds
 
@@ -65,11 +64,14 @@ def train_base_models_with_oof(data, feature_group, n_splits=5, model_save_dir="
         auc = roc_auc_score(y, oof_preds)
         auc_scores[name] = auc
         oof_storage[name] = oof_preds
-        print(f"[{feature_group}] {name} FINAL OOF AUC: {auc:.4f}\n")
+        if logger:
+            logger.info(f"[{feature_group}] {name} FINAL OOF AUC: {auc:.4f}")
 
     # Select top 3 models by AUC
     top_models = sorted(auc_scores.items(), key=lambda x: x[1], reverse=True)[:3]
-    print(f"[{feature_group}] ✅ Top 3 Models by AUC: {[m[0] for m in top_models]}\n")
+    if logger:
+        logger.info(f"[{feature_group}] ✅ Top 3 Models by AUC: {[m[0] for m in top_models]}\n")
+
 
     oof_df = pd.DataFrame({"SK_ID_CURR": id_col})
     for name, _ in top_models:
